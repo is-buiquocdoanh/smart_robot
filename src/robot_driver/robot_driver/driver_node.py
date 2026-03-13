@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+
+import rclpy
+from rclpy.node import Node
+
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry as OdomMsg
+from geometry_msgs.msg import TransformStamped
+
+from tf2_ros import TransformBroadcaster
+
+from .motor_control import *
+from .odom import Odometry as DiffOdom
+from .usb_can_a import USBCanA
+
+
+"""
+ROS2 node that bridges /cmd_vel -> motor controller.
+
+Notes and debugging tips:
+- The motor IO (serial/CAN) can block if you perform round-trip `transact`
+    calls on every control loop tick. To keep the ROS timer responsive the
+    node sends speed frames non-blocking (uses run_speed_rpm(..., wait_response=False)).
+- Encoder reads and odometry updates are intentionally performed at a
+    lower rate (controlled by `_ticks_per_encoder`) to reduce blocking.
+- Tuning:
+    - increase `_ticks_per_encoder` to lower CPU/IO usage further (but odom
+        updates will be less frequent)
+    - decrease `_ticks_per_encoder` to increase odom t Hz (but more serial reads)
+    - If you need both high-rate odom and low-latency commands, consider
+        moving serial I/O to a dedicated thread that reads/writes continuously.
+"""
+
+
+class TsdaDriver(Node):
+
+    def __init__(self):
+
+        super().__init__("tsda_driver")
+
+        self.subscription = self.create_subscription(
+            Twist,
+            "/cmd_vel",
+            self.cmd_callback,
+            10
+        )
+
+        self.odom_pub = self.create_publisher(
+            OdomMsg,
+            "/odom",
+            10
+        )
+
+        self.tf_broadcaster = TransformBroadcaster(self)
+
+        self.dev = USBCanA(port=PORT, baudrate=SERIAL_BAUD)
+
+        initialize_driver(self.dev, LEFT_ID)
+        initialize_driver(self.dev, RIGHT_ID)
+
+        self.odom = DiffOdom(
+            wheel_radius=WHEEL_RADIUS,
+            wheel_base=WHEEL_BASE,
+            encoder_cpr=ENCODER_CPR
+        )
+
+        self.vx = 0.0
+        self.omega = 0.0
+        # run at 100 Hz; but avoid blocking serial calls every tick.
+        # we'll send speed commands every tick (non-blocking) but only
+        # read encoders and update odom at a lower rate.
+        self.timer = self.create_timer(0.01, self.update) # 100 Hz
+
+        # counter to reduce blocking encoder reads; read encoders every N ticks
+        self._ticks = 0
+        self._ticks_per_encoder = 5  # 100Hz / 5 -> 20 Hz encoder/odom update
+
+        self.last_time = self.get_clock().now()
+
+    def cmd_callback(self, msg):
+
+        self.vx = msg.linear.x
+        self.omega = msg.angular.z
+
+    def update(self):
+
+        rpm_left, rpm_right = twist_to_rpm(self.vx, self.omega)
+
+        # Send speed commands without waiting for a response to avoid
+        # blocking the timer loop. The motor controller accepts frames
+        # and will act on them even if we don't wait for an ACK.
+        run_speed_rpm(self.dev, LEFT_ID, rpm_left, wait_response=False)
+        run_speed_rpm(self.dev, RIGHT_ID, rpm_right, wait_response=False)
+
+        # Only read encoders and update odometry at a reduced rate to
+        # avoid blocking the 100 Hz control loop with serial reads.
+        self._ticks += 1
+        if self._ticks % self._ticks_per_encoder != 0:
+            return
+
+        left = read_encoder(self.dev, LEFT_ID)
+        right = read_encoder(self.dev, RIGHT_ID)
+
+        if left is None or right is None:
+            # Log a warning so we can see in runtime why odom is not published.
+            self.get_logger().warning(
+                f"Encoder read failed: left={left} right={right} tick={self._ticks}"
+            )
+            return
+
+        now = self.get_clock().now()
+        dt = (now - self.last_time).nanoseconds / 1e9
+        self.last_time = now
+
+        state = self.odom.update(left, right, dt)
+
+        self.publish_odom(state)
+        # Log at debug level that we published odometry (helps verify publisher)
+        self.get_logger().debug(
+            f"Published odom: x={state.x:.3f} y={state.y:.3f} vx={state.vx:.3f} omega={state.omega:.3f}"
+        )
+
+    def publish_odom(self, state):
+
+        msg = OdomMsg()
+
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "odom"
+        msg.child_frame_id = "base_link"
+
+        msg.pose.pose.position.x = state.x
+        msg.pose.pose.position.y = state.y
+
+        msg.twist.twist.linear.x = state.vx
+        msg.twist.twist.angular.z = state.omega
+
+        self.odom_pub.publish(msg)
+
+        t = TransformStamped()
+
+        t.header.stamp = msg.header.stamp
+        t.header.frame_id = "odom"
+        t.child_frame_id = "base_link"
+
+        t.transform.translation.x = state.x
+        t.transform.translation.y = state.y
+
+        self.tf_broadcaster.sendTransform(t)
+
+
+def main(args=None):
+
+    rclpy.init(args=args)
+
+    node = TsdaDriver()
+
+    rclpy.spin(node)
+
+    node.destroy_node()
+
+    rclpy.shutdown()

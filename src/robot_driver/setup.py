@@ -24,7 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'motor_node = robot_driver.motor_node:main',
+            'driver_node = robot_driver.driver_node:main',
         ],
     },
 )

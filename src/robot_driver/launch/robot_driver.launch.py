@@ -8,7 +8,7 @@ def generate_launch_description():
 
         Node(
             package="robot_driver",
-            executable="motor_node",
+            executable="driver_node",
             output="screen"
         )
 
