@@ -68,6 +68,13 @@ class TsdaDriver(Node):
 
         self.vx = 0.0
         self.omega = 0.0
+        # Whether we should actively send speed commands to the motor
+        # controllers. When False we still read encoders and publish odom
+        # but do not send run_speed_rpm frames so motors are not driven.
+        self.control_active = False
+        # Small deadzone to treat very small velocities as zero
+        self._vel_deadzone = 1e-4
+
         # run at 100 Hz; but avoid blocking serial calls every tick.
         # we'll send speed commands every tick (non-blocking) but only
         # read encoders and update odom at a lower rate.
@@ -88,18 +95,52 @@ class TsdaDriver(Node):
 
     def cmd_callback(self, msg):
 
-        self.vx = msg.linear.x
-        self.omega = msg.angular.z
+        vx = msg.linear.x
+        omega = msg.angular.z
+
+        # Update stored commands
+        self.vx = vx
+        self.omega = omega
+
+        # Determine if this is a non-zero command (outside deadzone)
+        nonzero = (abs(vx) > self._vel_deadzone) or (abs(omega) > self._vel_deadzone)
+
+        if nonzero and not self.control_active:
+            # Transition inactive -> active: start sending commands
+            self.get_logger().debug("Control active: enabling motor commands")
+            self.control_active = True
+
+        if not nonzero and self.control_active:
+            # Transition active -> inactive: send a stop sequence once and
+            # then cease sending further speed frames so motors are free.
+            self.get_logger().info("Control inactive: sending stop sequence and disabling active commands")
+            try:
+                # send a few zero RPMs non-blocking to increase chance of delivery
+                for _ in range(3):
+                    run_speed_rpm(self.dev, LEFT_ID, 0, wait_response=False)
+                    run_speed_rpm(self.dev, RIGHT_ID, 0, wait_response=False)
+                    time.sleep(0.02)
+                # blocking stop command
+                stop_motor(self.dev, LEFT_ID)
+                stop_motor(self.dev, RIGHT_ID)
+            except Exception as exc:  # pragma: no cover - runtime safety
+                self.get_logger().warning(f"Failed to send stop sequence: {exc}")
+
+            self.control_active = False
 
     def update(self):
 
         rpm_left, rpm_right = twist_to_rpm(self.vx, self.omega)
 
-        # Send speed commands without waiting for a response to avoid
-        # blocking the timer loop. The motor controller accepts frames
-        # and will act on them even if we don't wait for an ACK.
-        run_speed_rpm(self.dev, LEFT_ID, rpm_left, wait_response=False)
-        run_speed_rpm(self.dev, RIGHT_ID, rpm_right, wait_response=False)
+        # Send speed commands only when control_active is True. If control
+        # is inactive we do not send frames so the motor controller is not
+        # continuously commanded (allows free/coast behaviour).
+        if self.control_active:
+            # Send speed commands without waiting for a response to avoid
+            # blocking the timer loop. The motor controller accepts frames
+            # and will act on them even if we don't wait for an ACK.
+            run_speed_rpm(self.dev, LEFT_ID, rpm_left, wait_response=False)
+            run_speed_rpm(self.dev, RIGHT_ID, rpm_right, wait_response=False)
 
         # Only read encoders and update odometry at a reduced rate to
         # avoid blocking the 100 Hz control loop with serial reads.
@@ -197,5 +238,10 @@ def main(args=None):
         try:
             _safe_shutdown(node)
         finally:
-            node.destroy_node()
+            # Destroy the node and shutdown rclpy
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
             rclpy.shutdown()
+            

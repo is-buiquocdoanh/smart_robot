@@ -30,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'driver_node = robot_driver.driver_node:main',
+            'encoder_node = robot_driver.encoder_node:main',
         ],
     },
 )
