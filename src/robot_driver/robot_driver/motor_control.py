@@ -17,7 +17,7 @@ RESPONSE_TIMEOUT = 0.3
 LEFT_ID = 0x01
 RIGHT_ID = 0x02
 
-WHEEL_RADIUS = 0.05   # m
+WHEEL_RADIUS = 0.074   # m
 WHEEL_BASE = 0.30     # m
 ENCODER_CPR = 10000   # count per revolution
 

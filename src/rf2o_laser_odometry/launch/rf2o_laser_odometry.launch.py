@@ -14,7 +14,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'laser_scan_topic': '/scan',
-                'odom_topic': '/odom', # có thể sử dụng /odom_rf2o
+                'odom_topic': '/rf2o/odom', # có thể sử dụng /odom_rf2o
                 'publish_tf': True,
                 'base_frame_id': 'base_link',
                 'odom_frame_id': 'odom',

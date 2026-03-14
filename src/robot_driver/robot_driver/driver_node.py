@@ -12,6 +12,8 @@ from tf2_ros import TransformBroadcaster
 from .motor_control import *
 from .odom import Odometry as DiffOdom
 from .usb_can_a import USBCanA
+import time
+import signal
 
 
 """
@@ -47,7 +49,7 @@ class TsdaDriver(Node):
 
         self.odom_pub = self.create_publisher(
             OdomMsg,
-            "/odom",
+            "/wheel/odom",
             10
         )
 
@@ -76,6 +78,13 @@ class TsdaDriver(Node):
         self._ticks_per_encoder = 5  # 100Hz / 5 -> 20 Hz encoder/odom update
 
         self.last_time = self.get_clock().now()
+
+        # flag set by external signal handlers to request clean shutdown
+        self._shutdown_requested = False
+
+    def request_shutdown(self):
+        # mark shutdown requested so external code can check
+        self._shutdown_requested = True
 
     def cmd_callback(self, msg):
 
@@ -154,8 +163,39 @@ def main(args=None):
 
     node = TsdaDriver()
 
-    rclpy.spin(node)
+    try:
+        rclpy.spin(node)
+    finally:
+        # Ensure we send a safe shutdown sequence to the motor controllers
+        # and close the serial device on shutdown so the motors are not
+        # left in an enabled/holding state when the node exits.
+        def _safe_shutdown(n: TsdaDriver):
+            # 1) Send a few zero-RPM commands non-blocking to increase the
+            # chance the controller receives a velocity=0 as the last
+            # command.
+            try:
+                for _ in range(4):
+                    run_speed_rpm(n.dev, LEFT_ID, 0, wait_response=False)
+                    run_speed_rpm(n.dev, RIGHT_ID, 0, wait_response=False)
+                    time.sleep(0.02)
+            except Exception as exc:  # pragma: no cover - runtime safety
+                n.get_logger().warning(f"Failed sending zero RPMs during shutdown: {exc}")
 
-    node.destroy_node()
+            # 2) Try to send a blocking STOP MOTOR frame (best-effort).
+            try:
+                stop_motor(n.dev, LEFT_ID)
+                stop_motor(n.dev, RIGHT_ID)
+            except Exception as exc:  # pragma: no cover - runtime safety
+                n.get_logger().warning(f"Failed to send stop command on shutdown: {exc}")
 
-    rclpy.shutdown()
+            # 3) Close the serial device.
+            try:
+                n.dev.close()
+            except Exception:
+                pass
+
+        try:
+            _safe_shutdown(node)
+        finally:
+            node.destroy_node()
+            rclpy.shutdown()
