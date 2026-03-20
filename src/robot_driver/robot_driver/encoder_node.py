@@ -10,9 +10,10 @@ from nav_msgs.msg import Odometry as OdomMsg
 from geometry_msgs.msg import TransformStamped
 from tf2_ros import TransformBroadcaster
 
-from .motor_control import read_encoder, LEFT_ID, RIGHT_ID, WHEEL_RADIUS, WHEEL_BASE, ENCODER_CPR
+from .motor_control import read_encoder, LEFT_ID, RIGHT_ID, WHEEL_RADIUS, WHEEL_BASE, ENCODER_CPR, PORT, SERIAL_BAUD, GEAR_RATIO
 from .odom import Odometry as DiffOdom
 from .usb_can_a import USBCanA
+import rcl_interfaces.msg
 
 
 class EncoderNode(Node):
@@ -33,13 +34,33 @@ class EncoderNode(Node):
 
         # Open the serial/CAN adapter. Use the same defaults as motor_control
         # so this node can run on the same hardware without changes.
-        self.dev = USBCanA()
+        port_param = self.declare_parameter("port", PORT).get_parameter_value().string_value
+        baud_param = int(self.declare_parameter("baudrate", int(SERIAL_BAUD)).get_parameter_value().integer_value)
+    gear_param = float(self.declare_parameter("gear_ratio", float(GEAR_RATIO)).get_parameter_value().double_value)
+
+        self.get_logger().info(f"Encoder node using port={port_param} baud={baud_param} gear={gear_param}")
+
+        self.dev = USBCanA(port=port_param, baudrate=baud_param)
 
         self.odom = DiffOdom(
             wheel_radius=WHEEL_RADIUS,
             wheel_base=WHEEL_BASE,
             encoder_cpr=ENCODER_CPR,
+            gear_ratio=gear_param,
         )
+
+        # allow updating gear_ratio at runtime
+        def _on_set_params(params):
+            for p in params:
+                if p.name == 'gear_ratio':
+                    try:
+                        self.odom.GEAR = float(p.value)
+                        return rcl_interfaces.msg.SetParametersResult(successful=True)
+                    except Exception:
+                        return rcl_interfaces.msg.SetParametersResult(successful=False, reason='invalid gear_ratio')
+            return rcl_interfaces.msg.SetParametersResult(successful=True)
+
+        self.add_on_set_parameters_callback(_on_set_params)
 
         # read rate: 20 Hz by default (same effective rate used in driver_node)
         self._rate_hz = 20.0

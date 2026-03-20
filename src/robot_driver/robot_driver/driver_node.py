@@ -8,6 +8,7 @@ from nav_msgs.msg import Odometry as OdomMsg
 from geometry_msgs.msg import TransformStamped
 
 from tf2_ros import TransformBroadcaster
+from rcl_interfaces.msg import SetParametersResult
 
 from .motor_control import *
 from .odom import Odometry as DiffOdom
@@ -40,6 +41,21 @@ class TsdaDriver(Node):
 
         super().__init__("tsda_driver")
 
+        # Runtime-configurable parameters
+        port_param = self.declare_parameter("port", PORT).get_parameter_value().string_value
+        baud_param = int(self.declare_parameter("baudrate", int(SERIAL_BAUD)).get_parameter_value().integer_value)
+        gear_param = float(self.declare_parameter("gear_ratio", float(GEAR_RATIO)).get_parameter_value().double_value)
+        invert_left = bool(self.declare_parameter("invert_left", False).get_parameter_value().bool_value)
+        invert_right = bool(self.declare_parameter("invert_right", True).get_parameter_value().bool_value)
+
+        # Apply initial runtime settings
+        try:
+            set_gear_ratio(gear_param)
+        except Exception:
+            self.get_logger().warning(f"Invalid gear_ratio parameter: {gear_param}")
+        set_inversions(left=invert_left, right=invert_right)
+
+
         self.subscription = self.create_subscription(
             Twist,
             "/cmd_vel",
@@ -55,16 +71,58 @@ class TsdaDriver(Node):
 
         self.tf_broadcaster = TransformBroadcaster(self)
 
-        self.dev = USBCanA(port=PORT, baudrate=SERIAL_BAUD)
+        self.dev = USBCanA(port=port_param, baudrate=baud_param)
 
-        initialize_driver(self.dev, LEFT_ID)
-        initialize_driver(self.dev, RIGHT_ID)
+        try:
+            initialize_driver(self.dev, LEFT_ID)
+            initialize_driver(self.dev, RIGHT_ID)
+        except Exception as exc:
+            self.get_logger().warning(f"Driver init warning: {exc}")
 
-        self.odom = DiffOdom(
-            wheel_radius=WHEEL_RADIUS,
-            wheel_base=WHEEL_BASE,
-            encoder_cpr=ENCODER_CPR
-        )
+        # Construct Odometry. Newer Odometry accepts `gear_ratio`; older
+        # installed versions may not. Try both to remain backwards
+        # compatible when running against an out-of-date install.
+        try:
+            self.odom = DiffOdom(
+                wheel_radius=WHEEL_RADIUS,
+                wheel_base=WHEEL_BASE,
+                encoder_cpr=ENCODER_CPR,
+                gear_ratio=gear_param,
+            )
+        except TypeError:
+            # fallback: older Odometry signature
+            self.get_logger().info("Odometry.__init__() doesn't accept gear_ratio; using fallback and setting GEAR if possible")
+            self.odom = DiffOdom(
+                wheel_radius=WHEEL_RADIUS,
+                wheel_base=WHEEL_BASE,
+                encoder_cpr=ENCODER_CPR,
+            )
+            try:
+                self.odom.GEAR = gear_param
+            except Exception:
+                # ignore if attribute not present
+                pass
+
+        # Parameter change callback to allow updating gear_ratio and
+        # inversion flags at runtime.
+        def _on_set_params(params):
+            successful = True
+            reason = ''
+            for p in params:
+                try:
+                    if p.name == 'gear_ratio':
+                        set_gear_ratio(p.value)
+                        self.odom.GEAR = float(p.value)
+                    elif p.name == 'invert_left':
+                        set_inversion(LEFT_ID, bool(p.value))
+                    elif p.name == 'invert_right':
+                        set_inversion(RIGHT_ID, bool(p.value))
+                except Exception as exc:
+                    successful = False
+                    reason = str(exc)
+            return SetParametersResult(successful=successful, reason=reason)
+
+        self.add_on_set_parameters_callback(_on_set_params)
 
         self.vx = 0.0
         self.omega = 0.0
@@ -136,11 +194,12 @@ class TsdaDriver(Node):
         # is inactive we do not send frames so the motor controller is not
         # continuously commanded (allows free/coast behaviour).
         if self.control_active:
-            # Send speed commands without waiting for a response to avoid
-            # blocking the timer loop. The motor controller accepts frames
-            # and will act on them even if we don't wait for an ACK.
-            run_speed_rpm(self.dev, LEFT_ID, rpm_left, wait_response=False)
-            run_speed_rpm(self.dev, RIGHT_ID, rpm_right, wait_response=False)
+            # Apply per-motor inversion (configurable)
+            rpm_left_send = apply_inversion(LEFT_ID, rpm_left)
+            rpm_right_send = apply_inversion(RIGHT_ID, rpm_right)
+
+            run_speed_rpm(self.dev, LEFT_ID, rpm_left_send, wait_response=False)
+            run_speed_rpm(self.dev, RIGHT_ID, rpm_right_send, wait_response=False)
 
         # Only read encoders and update odometry at a reduced rate to
         # avoid blocking the 100 Hz control loop with serial reads.

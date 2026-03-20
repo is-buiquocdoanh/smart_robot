@@ -22,8 +22,41 @@ WHEEL_BASE = 0.30     # m
 ENCODER_CPR = 10000   # count per revolution
 
 MAX_VX = 1.0          # m/s
-MAX_OMEGA = 2.0       # rad/s
+MAX_OMEGA = 3.0       # rad/s
 MAX_RPM = 3000
+
+# Gearbox ratio (motor revolutions : wheel revolutions).
+# Default to 35.0 for a 1:35 planetary gearbox (motor turns 35x per wheel rev).
+GEAR_RATIO = 35.0
+
+# Inversion flags for motor direction. Changeable at runtime via helpers
+# or via driver node ROS parameters.
+LEFT_INVERT = False
+RIGHT_INVERT = False
+
+_INVERT_MAP = {
+    LEFT_ID: LEFT_INVERT,
+    RIGHT_ID: RIGHT_INVERT,
+}
+
+
+def set_inversion(node_id: int, invert: bool) -> None:
+    _INVERT_MAP[node_id] = bool(invert)
+
+
+def set_inversions(left: bool = False, right: bool = False) -> None:
+    _INVERT_MAP[LEFT_ID] = bool(left)
+    _INVERT_MAP[RIGHT_ID] = bool(right)
+
+
+def apply_inversion(node_id: int, rpm: int) -> int:
+    return -rpm if _INVERT_MAP.get(node_id, False) else rpm
+
+
+def set_gear_ratio(r: float) -> None:
+    """Set the global GEAR_RATIO used for conversions (motor revs per wheel rev)."""
+    global GEAR_RATIO
+    GEAR_RATIO = float(r)
 
 
 def hex_bytes(s: str) -> bytes:
@@ -149,8 +182,15 @@ def twist_to_rpm(vx: float, omega: float) -> Tuple[int, int]:
     v_left = vx - omega * WHEEL_BASE / 2.0
     v_right = vx + omega * WHEEL_BASE / 2.0
 
-    rpm_left = int(round(linear_to_rpm(v_left)))
-    rpm_right = int(round(linear_to_rpm(v_right)))
+    # Convert wheel linear speeds to wheel RPM, then to motor RPM via gearbox
+    wheel_rpm_left = linear_to_rpm(v_left)
+    wheel_rpm_right = linear_to_rpm(v_right)
+
+    motor_rpm_left = wheel_rpm_left * GEAR_RATIO
+    motor_rpm_right = wheel_rpm_right * GEAR_RATIO
+
+    rpm_left = int(round(motor_rpm_left))
+    rpm_right = int(round(motor_rpm_right))
 
     rpm_left = int(clamp(rpm_left, -MAX_RPM, MAX_RPM))
     rpm_right = int(clamp(rpm_right, -MAX_RPM, MAX_RPM))
@@ -197,8 +237,8 @@ def main() -> None:
             rpm_left, rpm_right = twist_to_rpm(vx, omega)
 
             # Here in CLI mode we use blocking calls to display encoder values
-            run_speed_rpm(dev, LEFT_ID, rpm_left)
-            run_speed_rpm(dev, RIGHT_ID, rpm_right)
+            run_speed_rpm(dev, LEFT_ID, apply_inversion(LEFT_ID, rpm_left))
+            run_speed_rpm(dev, RIGHT_ID, apply_inversion(RIGHT_ID, rpm_right))
 
             left_count = read_encoder(dev, LEFT_ID)
             right_count = read_encoder(dev, RIGHT_ID)
