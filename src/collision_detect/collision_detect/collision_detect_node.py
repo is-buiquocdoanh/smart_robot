@@ -42,11 +42,11 @@ class CollisionDetectNode(Node):
 		super().__init__('collision_detect')
 
 		# parameters
-		self.declare_parameter('serial_port', '/dev/ttyUSB0')
+		self.declare_parameter('serial_port', '/dev/esp32')
 		self.declare_parameter('baudrate', 115200)
-		self.declare_parameter('move_speed', 0.3)       # m/s
+		self.declare_parameter('move_speed', 0.1)       # m/s
 		self.declare_parameter('move_distance', 0.5)    # meters
-		self.declare_parameter('move_duration', 1.0)    # seconds; if >0 overrides distance/speed
+		self.declare_parameter('move_duration', 3.0)    # seconds; if >0 overrides distance/speed
 		self.declare_parameter('publish_hz', 10)
 
 		self.serial_port: str = self.get_parameter('serial_port').value
@@ -152,14 +152,15 @@ class CollisionDetectNode(Node):
 
 		with self._motion_lock:
 			if not self._motion_active:
-				# no motion: publish zero once
-				self.cmd_pub.publish(publish_twist)
+				# no active collision motion: do not publish
 				return
 
 			# non-odom: stop by time
 			if now >= self._motion_end_time:
 				self._motion_active = False
 				self.get_logger().info('Motion complete (time)')
+				# motion finished: publish a single zero Twist to ensure the robot stops,
+				# then return (no continuous publishing when idle)
 				self.cmd_pub.publish(Twist())
 				return
 
@@ -198,3 +199,4 @@ def main(args=None):
 
 if __name__ == '__main__':
 	main()
+

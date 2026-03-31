@@ -8,7 +8,7 @@ from .usb_can_a import USBCanA, CanFrame
 # =========================
 # Configuration / constants
 # =========================
-PORT = "/dev/ttyUSB0"
+PORT = "/dev/usbcan"
 SERIAL_BAUD = 2_000_000
 # How long to wait for replies in transact() (seconds). A larger value
 # increases reliability but can block the control loop longer.

@@ -43,7 +43,7 @@ def generate_launch_description():
             'use_sim_time',
             default_value='false',
             description='Use sim time if true'),
-        joy_node,
-        teleop_node,
+        # joy_node,
+        # teleop_node,
         twist_mux_node    
     ])

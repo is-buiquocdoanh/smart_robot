@@ -36,7 +36,7 @@ class BatteryNode(Node):
         super().__init__('battery_node')
 
         # Parameters
-        self.declare_parameter('port', '/dev/ttyUSB0')
+        self.declare_parameter('port', '/dev/battery')
         self.declare_parameter('baudrate', 9600)
         self.declare_parameter('slave_id', 1)
         self.declare_parameter('read_retries', 4)
