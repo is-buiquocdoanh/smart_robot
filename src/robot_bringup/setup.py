@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 import os
 from glob import glob
 
-package_name = 'collision_detect'
+package_name = 'robot_bringup'
 
 setup(
     name=package_name,
@@ -27,7 +27,6 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'collision_detect_node = collision_detect.collision_detect_node:main',
         ],
     },
 )
