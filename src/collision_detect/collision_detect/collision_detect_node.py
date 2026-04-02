@@ -44,7 +44,7 @@ class CollisionDetectNode(Node):
 		# parameters
 		self.declare_parameter('serial_port', '/dev/esp32')
 		self.declare_parameter('baudrate', 115200)
-		self.declare_parameter('move_speed', 0.1)       # m/s
+		self.declare_parameter('move_speed', 0.2)       # m/s
 		self.declare_parameter('move_distance', 0.5)    # meters
 		self.declare_parameter('move_duration', 3.0)    # seconds; if >0 overrides distance/speed
 		self.declare_parameter('publish_hz', 10)
