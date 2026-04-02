@@ -4,14 +4,10 @@ import rclpy
 from rclpy.node import Node
 
 from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry as OdomMsg
-from geometry_msgs.msg import TransformStamped
-
-from tf2_ros import TransformBroadcaster
 from rcl_interfaces.msg import SetParametersResult
 
 from .motor_control import *
-from .odom import Odometry as DiffOdom
+# odometry removed: not using wheel/odom due to inaccuracy
 from .usb_can_a import USBCanA
 import time
 import signal
@@ -63,13 +59,7 @@ class TsdaDriver(Node):
             10
         )
 
-        self.odom_pub = self.create_publisher(
-            OdomMsg,
-            "/wheel/odom",
-            10
-        )
-
-        self.tf_broadcaster = TransformBroadcaster(self)
+        # odometry publisher and TF broadcaster removed (odom not used)
 
         self.dev = USBCanA(port=port_param, baudrate=baud_param)
 
@@ -79,29 +69,7 @@ class TsdaDriver(Node):
         except Exception as exc:
             self.get_logger().warning(f"Driver init warning: {exc}")
 
-        # Construct Odometry. Newer Odometry accepts `gear_ratio`; older
-        # installed versions may not. Try both to remain backwards
-        # compatible when running against an out-of-date install.
-        try:
-            self.odom = DiffOdom(
-                wheel_radius=WHEEL_RADIUS,
-                wheel_base=WHEEL_BASE,
-                encoder_cpr=ENCODER_CPR,
-                gear_ratio=gear_param,
-            )
-        except TypeError:
-            # fallback: older Odometry signature
-            self.get_logger().info("Odometry.__init__() doesn't accept gear_ratio; using fallback and setting GEAR if possible")
-            self.odom = DiffOdom(
-                wheel_radius=WHEEL_RADIUS,
-                wheel_base=WHEEL_BASE,
-                encoder_cpr=ENCODER_CPR,
-            )
-            try:
-                self.odom.GEAR = gear_param
-            except Exception:
-                # ignore if attribute not present
-                pass
+        # Odometry removed: not constructing DiffOdom because wheel/odom is inaccurate
 
         # Parameter change callback to allow updating gear_ratio and
         # inversion flags at runtime.
@@ -111,8 +79,8 @@ class TsdaDriver(Node):
             for p in params:
                 try:
                     if p.name == 'gear_ratio':
+                        # update gear ratio used for motor_control calculations
                         set_gear_ratio(p.value)
-                        self.odom.GEAR = float(p.value)
                     elif p.name == 'invert_left':
                         set_inversion(LEFT_ID, bool(p.value))
                     elif p.name == 'invert_right':
@@ -138,11 +106,7 @@ class TsdaDriver(Node):
         # read encoders and update odom at a lower rate.
         self.timer = self.create_timer(0.01, self.update) # 100 Hz
 
-        # counter to reduce blocking encoder reads; read encoders every N ticks
-        self._ticks = 0
-        self._ticks_per_encoder = 5  # 100Hz / 5 -> 20 Hz encoder/odom update
-
-        self.last_time = self.get_clock().now()
+    # encoder/odometry removed: node will only send motor commands
 
         # flag set by external signal handlers to request clean shutdown
         self._shutdown_requested = False
@@ -201,60 +165,10 @@ class TsdaDriver(Node):
             run_speed_rpm(self.dev, LEFT_ID, rpm_left_send, wait_response=False)
             run_speed_rpm(self.dev, RIGHT_ID, rpm_right_send, wait_response=False)
 
-        # Only read encoders and update odometry at a reduced rate to
-        # avoid blocking the 100 Hz control loop with serial reads.
-        self._ticks += 1
-        if self._ticks % self._ticks_per_encoder != 0:
-            return
+        # Encoder reads and odometry publishing removed.
+        # The node's responsibility is now limited to translating /cmd_vel -> motor commands.
 
-        left = read_encoder(self.dev, LEFT_ID)
-        right = read_encoder(self.dev, RIGHT_ID)
-
-        if left is None or right is None:
-            # Log a warning so we can see in runtime why odom is not published.
-            self.get_logger().warning(
-                f"Encoder read failed: left={left} right={right} tick={self._ticks}"
-            )
-            return
-
-        now = self.get_clock().now()
-        dt = (now - self.last_time).nanoseconds / 1e9
-        self.last_time = now
-
-        state = self.odom.update(left, right, dt)
-
-        self.publish_odom(state)
-        # Log at debug level that we published odometry (helps verify publisher)
-        self.get_logger().debug(
-            f"Published odom: x={state.x:.3f} y={state.y:.3f} vx={state.vx:.3f} omega={state.omega:.3f}"
-        )
-
-    def publish_odom(self, state):
-
-        msg = OdomMsg()
-
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "odom"
-        msg.child_frame_id = "base_link"
-
-        msg.pose.pose.position.x = state.x
-        msg.pose.pose.position.y = state.y
-
-        msg.twist.twist.linear.x = state.vx
-        msg.twist.twist.angular.z = state.omega
-
-        self.odom_pub.publish(msg)
-
-        t = TransformStamped()
-
-        t.header.stamp = msg.header.stamp
-        t.header.frame_id = "odom"
-        t.child_frame_id = "base_link"
-
-        t.transform.translation.x = state.x
-        t.transform.translation.y = state.y
-
-        self.tf_broadcaster.sendTransform(t)
+    # (odometry publishing removed)
 
 
 def main(args=None):
