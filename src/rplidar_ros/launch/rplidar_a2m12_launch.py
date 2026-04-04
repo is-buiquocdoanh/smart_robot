@@ -25,7 +25,7 @@ def generate_launch_description():
         name='static_tf_pub_laser',
         arguments=[
             '0', '0', '0',   # vị trí
-            '3.1415', '0', '0', # roll pitch yaw (xoay 180 độ quanh Z)
+            '0', '0', '1', '0',  # roll pitch yaw (xoay 180 độ quanh Z)
             'base_link',
             'laser'
         ],
@@ -81,4 +81,3 @@ def generate_launch_description():
                          'angle_compensate': angle_compensate}],
             output='screen'),
     ])
-
