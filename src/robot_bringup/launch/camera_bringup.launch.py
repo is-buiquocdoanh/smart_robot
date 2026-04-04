@@ -49,7 +49,7 @@ def generate_launch_description():
     # yolov8
     yolov8_node = Node(
         package='robot_recognition',
-        executable='yolov8_ros2_pt',
+        executable='yolov8_ros2_pt.py',
         name='yolov8',
         output='screen',
         parameters=[{'use_sim_time': False}]
@@ -68,6 +68,7 @@ def generate_launch_description():
     return LaunchDescription([
         camera_node,
         convert_compressed_image_node,
-        web_video_server_node
+        web_video_server_node,
+        yolov8_node,
         # rviz_launch
     ])
