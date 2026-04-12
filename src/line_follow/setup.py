@@ -25,7 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'rs485_dual_sensor_pub = line_follow.rs485_dual_sensor_pub:main',
-            'line_follower_cmdvel = line_follow.line_follower_cmdvel:main',
+            'line_follower_cmdvel_mag = line_follow.line_follower_cmdvel_mag:main',
         ],
     },
 )

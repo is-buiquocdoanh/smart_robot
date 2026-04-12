@@ -7,7 +7,7 @@ from std_msgs.msg import UInt16MultiArray
 import serial
 
 
-PORT = "/dev/ttyUSB0"
+PORT = "/dev/ttyUSB5"
 BAUD = 115200
 
 SENSOR_IDS = [1, 2]

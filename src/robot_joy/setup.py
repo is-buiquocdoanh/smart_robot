@@ -28,6 +28,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'joy_to_direction = robot_joy.joy_to_direction:main',
         ],
     },
 )
