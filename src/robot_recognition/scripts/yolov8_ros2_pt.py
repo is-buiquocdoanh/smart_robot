@@ -36,12 +36,12 @@ class Camera_subscriber(Node):
         self.img_pub = self.create_publisher(Image, "/inference_result", 1)
 
     def camera_callback(self, data):
-
         img = bridge.imgmsg_to_cv2(data, "bgr8")
         results = self.model(img)
 
         self.yolov8_inference.header.frame_id = "inference"
-        self.yolov8_inference.header.stamp = camera_subscriber.get_clock().now().to_msg()
+        # use the node's clock (was referencing undefined global)
+        self.yolov8_inference.header.stamp = self.get_clock().now().to_msg()
 
         for r in results:
             boxes = r.boxes
@@ -59,7 +59,10 @@ class Camera_subscriber(Node):
             #camera_subscriber.get_logger().info(f"{self.yolov8_inference}")
 
         annotated_frame = results[0].plot()
-        img_msg = bridge.cv2_to_imgmsg(annotated_frame)  
+        # Ensure we set an explicit encoding so consumers (and web server) can interpret the image
+        # annotated_frame from ultralytics is a numpy image; use 'bgr8' to match cv2 conventions
+        img_msg = bridge.cv2_to_imgmsg(annotated_frame, encoding='bgr8')
+        img_msg.header.stamp = self.get_clock().now().to_msg()
 
         self.img_pub.publish(img_msg)
         self.yolov8_pub.publish(self.yolov8_inference)

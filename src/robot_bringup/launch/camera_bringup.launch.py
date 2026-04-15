@@ -41,7 +41,8 @@ def generate_launch_description():
         parameters=[{
             'port': 8080,          # Cổng để truy cập trên trình duyệt
             'address': '0.0.0.0',  # Cho phép tất cả các IP trong mạng truy cập
-            'type': 'ros_compressed' # Ưu tiên dùng chuẩn nén để mượt hơn
+            # Serve raw ROS Image messages (useful when your node publishes sensor_msgs/Image)
+            'type': 'ros_image'
         }],
         output='screen'
     )
