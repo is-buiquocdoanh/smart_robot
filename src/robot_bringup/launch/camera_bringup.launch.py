@@ -73,3 +73,5 @@ def generate_launch_description():
         yolov8_node,
         # rviz_launch
     ])
+
+# truy cap http://<ip>:8080/

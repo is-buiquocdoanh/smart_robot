@@ -7,7 +7,7 @@ from std_msgs.msg import UInt16MultiArray
 import serial
 
 
-PORT = "/dev/ttyUSB5"
+PORT = "/dev/magnetic"
 BAUD = 115200
 
 SENSOR_IDS = [1, 2]
@@ -16,10 +16,15 @@ START_REG = 0x20   # 16 kênh analog
 REG_QTY = 8        # 8 thanh ghi = 16 byte
 RESP_LEN = 21
 
-SER_TIMEOUT = 0.5
-REQUEST_GAP = 0.03
-RETRY = 3
-PUBLISH_RATE = 20.0  # Hz
+SER_TIMEOUT = 0.12    # lower serial read timeout (s) to avoid long blocking
+REQUEST_GAP = 0.01    # short gap between requests
+RETRY = 1             # avoid multiple slow retries per timer cycle
+PUBLISH_RATE = 40.0   # Hz
+
+# Tuning notes:
+# - When only one sensor is connected, retries and long serial timeouts
+#   cause the timer callback to block and reduce effective publish rate.
+# - Use smaller timeout and a single attempt to avoid long blocking per cycle.
 
 
 def crc16_modbus(data: bytes) -> bytes:
@@ -66,6 +71,18 @@ class DualSensorPublisher(Node):
         self.pub1 = self.create_publisher(UInt16MultiArray, "/sensor1/analog16", 10)
         self.pub2 = self.create_publisher(UInt16MultiArray, "/sensor2/analog16", 10)
 
+        # allow polling only a single sensor for faster per-topic rate when
+        # you're testing with just one sensor connected. Set param
+        # `single_sensor` to 0 (default) for both, or 1/2 to poll only that id.
+        self.declare_parameter("single_sensor", 0)
+        single = int(self.get_parameter("single_sensor").get_parameter_value().integer_value)
+        if single in SENSOR_IDS and single != 0:
+            self.sensor_ids = [single]
+        else:
+            self.sensor_ids = list(SENSOR_IDS)
+        # mapping from sensor id -> publisher
+        self.pub_map = {1: self.pub1, 2: self.pub2}
+
         self.ser = serial.Serial(
             port=PORT,
             baudrate=BAUD,
@@ -82,6 +99,11 @@ class DualSensorPublisher(Node):
             pass
 
         self.timer = self.create_timer(1.0 / PUBLISH_RATE, self.timer_callback)
+        # read sensors in round-robin (one sensor per timer tick) to avoid
+        # blocking the timer when one sensor is slow or missing. This gives
+        # higher effective publish rate per topic compared to reading both
+        # sequentially in a single callback.
+        self._next_sensor = 0
         self.get_logger().info(f"Opened {PORT} @ {BAUD}")
 
     def read_16ch_once(self, sid: int):
@@ -130,16 +152,22 @@ class DualSensorPublisher(Node):
         raise last_err
 
     def timer_callback(self):
-        for sid, pub in zip(SENSOR_IDS, [self.pub1, self.pub2]):
-            try:
-                ch = self.read_16ch(sid)
-                msg = UInt16MultiArray()
-                msg.data = [int(v) for v in ch]
-                pub.publish(msg)
-            except Exception as e:
-                self.get_logger().warning(str(e))
+        # process only one sensor each timer tick (round-robin)
+        idx = self._next_sensor
+        sid = self.sensor_ids[idx]
+        pub = self.pub_map.get(sid)
+        try:
+            ch = self.read_16ch(sid)
+            msg = UInt16MultiArray()
+            msg.data = [int(v) for v in ch]
+            pub.publish(msg)
+        except Exception as e:
+            # warn but continue — next tick will try the other sensor
+            self.get_logger().warning(str(e))
 
-            time.sleep(REQUEST_GAP)
+        # small gap before next request (keeps timing stable when switching)
+        time.sleep(REQUEST_GAP)
+        self._next_sensor = (idx + 1) % len(self.sensor_ids)
 
     def destroy_node(self):
         if hasattr(self, "ser") and self.ser.is_open:

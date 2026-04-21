@@ -2,7 +2,7 @@ import serial
 import struct
 import time
 
-PORT = "/dev/ttyUSB5"
+PORT = "/dev/magnetic"
 BAUD = 115200
 SENSOR_IDS = [1, 2]
 

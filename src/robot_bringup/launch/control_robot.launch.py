@@ -41,12 +41,20 @@ def generate_launch_description():
         executable='battery_node',
         output='screen'
     )
+    
+    # line follow
+    line_follow_node = Node(
+        package='line_follow',
+        executable='rs485_single_sensor_pub_fast',
+        output='screen'
+    )
 
     return LaunchDescription([
         driver_launch,
         collision_detect_node,
         battery_node,
-        robot_joy
+        robot_joy,
+        line_follow_node
     ])
 
  # save map
