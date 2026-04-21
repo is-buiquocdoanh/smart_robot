@@ -12,7 +12,7 @@ from geometry_msgs.msg import Twist
 
 LINEAR_X = 0.08
 K_ANG = 0.35
-MAX_ANG = 0.15
+MAX_ANG = 0.2
 THRESHOLD_SUM = 1.0
 LOST_TIMEOUT = 0.3
 CONTROL_RATE = 20.0
