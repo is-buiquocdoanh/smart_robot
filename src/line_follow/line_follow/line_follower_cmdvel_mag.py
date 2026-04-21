@@ -10,9 +10,9 @@ from geometry_msgs.msg import Twist
 # Publishes Twist messages to /cmd_vel_mag. Use /line_follow/direction (String)
 # to change mode at runtime: 'forward' -> use sensor1, 'backward' -> use sensor2.
 
-LINEAR_X = 0.1
+LINEAR_X = 0.08
 K_ANG = 0.35
-MAX_ANG = 0.5
+MAX_ANG = 0.15
 THRESHOLD_SUM = 1.0
 LOST_TIMEOUT = 0.3
 CONTROL_RATE = 20.0
