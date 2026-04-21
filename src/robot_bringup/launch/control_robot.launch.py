@@ -27,6 +27,17 @@ def generate_launch_description():
             )
         )
     )
+
+    # rplidar a2m12
+    rplidar_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory('rplidar_ros'),
+                'launch',
+                'rplidar_a2m12_launch.py'
+            )
+        )
+    )
     
     # collision detect
     collision_detect_node = Node(
@@ -49,8 +60,10 @@ def generate_launch_description():
         output='screen'
     )
 
+
     return LaunchDescription([
         driver_launch,
+        rplidar_launch,
         collision_detect_node,
         battery_node,
         robot_joy,
