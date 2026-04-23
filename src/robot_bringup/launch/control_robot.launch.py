@@ -63,7 +63,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         driver_launch,
-        rplidar_launch,
+        # rplidar_launch,
         collision_detect_node,
         battery_node,
         robot_joy,
